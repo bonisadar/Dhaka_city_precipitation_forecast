@@ -59,20 +59,20 @@ def train_and_log_model(X, y):
     # Tracking URI - use environment variable for flexibility
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment("dhaka_city_precipitation_forecast_v5")
+    mlflow.set_experiment("dhaka_city_precipitation_forecast_v6")
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     model = xgb.XGBRegressor(objective='reg:squarederror', random_state=42)
     param_grid = {
-        'n_estimators': [400],
-        'max_depth': [10],
+        'n_estimators': [200, 400],
+        'max_depth': [7, 10],
         'learning_rate': [0.1, 0.01],
         'subsample': [0.8],
         'colsample_bytree': [0.8]
     }
 
-    search = GridSearchCV(model, param_grid, scoring='neg_mean_absolute_error', cv=2)
+    search = GridSearchCV(model, param_grid, scoring='neg_mean_absolute_error', cv=3)
 
     with mlflow.start_run():
         search.fit(X_train, y_train)
