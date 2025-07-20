@@ -202,6 +202,7 @@ def train_and_log_flow():
     # train_and_log_model(X, y) 
 
     metrics = train_and_log_model(X, y)
+    push_metrics_to_prometheus(metrics)
     
     # Load last month prediction
     last_y_pred_path = fetch_last_month_y_pred()
