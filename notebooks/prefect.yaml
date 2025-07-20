@@ -27,7 +27,7 @@ deployments:
   description: null
   schedule: {}
   flow_name: train_and_log_flow
-  entrypoint: notebooks/train_and_log.py
+  entrypoint: notebooks/train_and_log.py:train_and_log_flow
   parameters: {}
   work_pool:
     name: first_worker

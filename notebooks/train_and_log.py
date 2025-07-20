@@ -1,4 +1,5 @@
 import os
+assert os.path.exists(__file__), f"{__file__} not found!"
 
 # Set dynamically from env or fallback
 os.environ["PREFECT_API_URL"] = os.getenv("PREFECT_API_URL", "http://127.0.0.1:4200/api")
