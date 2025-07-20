@@ -4,8 +4,8 @@ assert os.path.exists(__file__), f"{__file__} not found!"
 # Set dynamically from env or fallback
 os.environ["PREFECT_API_URL"] = os.getenv("PREFECT_API_URL", "http://127.0.0.1:4200/api")
 
-from prefect_gcp import GcpCredentials
-gcp_credentials_block = GcpCredentials.load("gcp-credentials")
+# from prefect_gcp import GcpCredentials
+# gcp_credentials_block = GcpCredentials.load("gcp-credentials")
 
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from datetime import datetime
