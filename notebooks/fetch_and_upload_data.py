@@ -1,5 +1,5 @@
 from prefect import flow, task
-from prefect.blocks.system import Secret
+# from prefect.blocks.system import Secret
 from data_fetcher import fetch_weather_data, get_dynamic_date_range
 from google.cloud import storage
 import os
@@ -13,6 +13,7 @@ def save_to_local(df, file_path):
 @task
 def upload_to_gcs(file_path, destination_blob_name, bucket_name):
     storage_client = storage.Client()
+    bucket_name = "mlops-zoomcamp-bucke-2"
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(file_path)
@@ -31,7 +32,7 @@ def fetch_and_upload_flow():
     ]
 
     # Dynamic date range (last 20 years)
-    start_date, end_date = get_dynamic_date_range(days_back=7300, buffer_days=2)
+    start_date, end_date = get_dynamic_date_range(days_back=7300, buffer_days=7)
 
     # Fetch data
     df = fetch_weather_data(23.8041, 90.4152, hourly_vars, start_date, end_date)
@@ -41,7 +42,7 @@ def fetch_and_upload_flow():
     save_to_local(df, local_file)
 
     # Load GCS bucket name from Prefect Secret
-    #  bucket_name = Secret.load("gcp-bucket-name").get()
+    # bucket_name = Secret.load("gcp-bucket-name").get()
 
     # Upload to GCS
     upload_to_gcs(local_file, f'raw/raw_dhaka_weather.csv', bucket_name)

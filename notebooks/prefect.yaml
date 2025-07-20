@@ -13,11 +13,11 @@ build: null
 push: null
 
 # pull section allows you to provide instructions for cloning this project in remote locations
-#pull:
-#- prefect.deployments.steps.git_clone:
-#    repository: git@github.com:bonisadar/Dhaka_city_precipitation_forecast.git
-#    branch: master
-#    access_token: null
+pull:
+- prefect.deployments.steps.git_clone:
+    repository: git@github.com:bonisadar/Dhaka_city_precipitation_forecast.git
+    branch: master
+    access_token: null
 
 # the deployments section allows you to provide configuration for deploying flows
 deployments:
@@ -27,7 +27,7 @@ deployments:
   description: null
   schedule: {}
   flow_name: train_and_log_flow
-  entrypoint: train_and_log.py
+  entrypoint: notebooks/train_and_log.py
   parameters: {}
   work_pool:
     name: first_worker

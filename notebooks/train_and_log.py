@@ -3,12 +3,13 @@ import os
 # Set dynamically from env or fallback
 os.environ["PREFECT_API_URL"] = os.getenv("PREFECT_API_URL", "http://127.0.0.1:4200/api")
 
-
+from datetime import datetime
 from prefect import flow, task
 from google.cloud import storage
 import pandas as pd
 import numpy as np
 import mlflow
+from mlflow.tracking import MlflowClient
 import mlflow.xgboost
 import xgboost as xgb
 from mlflow.models import infer_signature
@@ -26,6 +27,43 @@ def download_from_gcs(blob_name, local_path):
     blob.download_to_filename(local_path)
     print(f"Downloaded gs://{bucket_name}/{blob_name} to {local_path}")
     return local_path
+
+# (Optional) Store y_pred.txt outside MLflow too (in GCS)
+# If want to avoid pulling from MLflow (e.g., for faster access or visualization), just upload to GCS directly.
+@task
+def upload_y_pred_to_gcs(local_file, destination_blob_name):
+    bucket_name = "mlops-zoomcamp-bucke-2"
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+    blob.upload_from_filename(local_file)
+    print(f"Uploaded {local_file} to gs://{bucket_name}/{destination_blob_name}")
+
+@task
+def fetch_last_month_y_pred(experiment_name="dhaka_city_precipitation_forecast_v7"):
+    client = MlflowClient()
+    
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        print("No experiment found.")
+        return None
+    
+    # Get runs sorted by start time descending
+    runs = client.search_runs(experiment_ids=[experiment.experiment_id],
+                              order_by=["start_time DESC"],
+                              max_results=2)
+
+    if len(runs) < 2:
+        print("Not enough historical runs for drift detection.")
+        return None
+    
+    # Take the *previous* run (second latest)
+    last_run_id = runs[1].info.run_id
+    
+    local_y_pred_path = f"/tmp/y_pred_last_month.txt"
+    client.download_artifacts(last_run_id, "y_pred.txt", "/tmp")
+
+    return local_y_pred_path
 
 # STEP 2: Feature engineering
 @task
@@ -59,7 +97,7 @@ def train_and_log_model(X, y):
     # Tracking URI - use environment variable for flexibility
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment("dhaka_city_precipitation_forecast_v6")
+    mlflow.set_experiment("dhaka_city_precipitation_forecast_v7")
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -97,6 +135,16 @@ def train_and_log_model(X, y):
 
         np.savetxt("y_pred.txt", y_pred)
         mlflow.log_artifact("y_pred.txt")
+        
+        # avoid pulling from MLflow (e.g., for faster access or visualization), just upload to  GCS directly.
+        
+        month_str = datetime.now().strftime("%B%Y")
+        upload_y_pred_to_gcs("y_pred.txt", f"predictions/y_pred_{month_str}.txt")
+
+        # upload_y_pred_to_gcs("y_pred.txt", "predictions/y_pred_July2025.txt") 
+
+        # Then later you can fetch it via
+        # blob.download_to_filename("y_pred_last_month.txt")
 
         mlflow.xgboost.log_model(best_model, name="model",
                                  input_example=X_test.iloc[:5],
@@ -104,8 +152,20 @@ def train_and_log_model(X, y):
 
     print(f"Model trained and logged: MAE={mae:.4f}, R²={r2:.4f}")
     return {"mae": mae, "mse": mse, "r2": r2}
+    
+@task
+def detect_drift(current_preds, last_month_preds, threshold=0.3):
+    curr_mean = np.mean(current_preds)
+    last_mean = np.mean(last_month_preds)
+    drift = abs(curr_mean - last_mean) / (abs(last_mean) + 1e-6)
+    
+    if drift > threshold:
+        print(f"Drift detected! Current mean: {curr_mean:.2f}, Last: {last_mean:.2f}")
+        return True
+    else:
+        print("No significant drift.")
+        return False
 
-# Main Prefect flow
 @flow(name="train_and_log_flow")
 def train_and_log_flow():
     blob_name = 'raw/raw_dhaka_weather.csv'
@@ -114,7 +174,19 @@ def train_and_log_flow():
     file_path = download_from_gcs(blob_name, local_path)
     df = pd.read_csv(file_path)
     X, y = engineer_features(df)
-    train_and_log_model(X, y)
+    # train_and_log_model(X, y) 
+
+    metrics = train_and_log_model(X, y)
+    
+    # Load last month prediction
+    last_y_pred_path = fetch_last_month_y_pred()
+    if last_y_pred_path and os.path.exists(last_y_pred_path):
+        last_y_pred = np.loadtxt(last_y_pred_path)
+        # detect_drift(metrics["mae"], last_y_pred)
+
+        y_pred = np.loadtxt("y_pred.txt")  # Load current predictions
+        detect_drift(y_pred, last_y_pred)
+
 
 if __name__ == "__main__":
     train_and_log_flow()

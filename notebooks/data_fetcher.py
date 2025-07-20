@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta, timezone
 
-def get_dynamic_date_range(days_back=7300, buffer_days=2):
+def get_dynamic_date_range(days_back=7300, buffer_days=7):
     today = datetime.now(timezone.utc).date()
     end_date = today - timedelta(days=buffer_days)
     start_date = end_date - timedelta(days=days_back)
@@ -11,7 +11,7 @@ def get_dynamic_date_range(days_back=7300, buffer_days=2):
 
 def fetch_weather_data(latitude, longitude, hourly_variables, start_date=None, end_date=None, timezone='Asia/Bangkok'):
     if start_date is None or end_date is None:
-        start_date, end_date = get_dynamic_date_range(days_back=7300, buffer_days=2)
+        start_date, end_date = get_dynamic_date_range(days_back=7300, buffer_days=7)
 
     base_url = 'https://archive-api.open-meteo.com/v1/archive'
     
