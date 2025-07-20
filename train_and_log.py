@@ -7,6 +7,7 @@ os.environ["PREFECT_API_URL"] = os.getenv("PREFECT_API_URL", "http://127.0.0.1:4
 from prefect_gcp import GcpCredentials
 gcp_credentials_block = GcpCredentials.load("gcp-credentials")
 
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from datetime import datetime
 from prefect import flow, task
 from google.cloud import storage
@@ -156,7 +157,27 @@ def train_and_log_model(X, y):
 
     print(f"Model trained and logged: MAE={mae:.4f}, R²={r2:.4f}")
     return {"mae": mae, "mse": mse, "r2": r2}
-    
+
+
+@task
+def assign_champion_alias(model_name: str):
+    client = MlflowClient()
+    latest = client.get_latest_versions(model_name, stages=[])
+    version = sorted(latest, key=lambda mv: int(mv.version))[-1]
+    client.set_registered_model_alias(model_name, "champion", version.version)
+
+
+@task
+def push_metrics_to_prometheus(metrics):
+    registry = CollectorRegistry()
+    g_mae = Gauge('model_mae', 'Model MAE', registry=registry)
+    g_r2 = Gauge('model_r2', 'Model R²', registry=registry)
+
+    g_mae.set(metrics['mae'])
+    g_r2.set(metrics['r2'])
+
+    push_to_gateway('http://localhost:9091', job='dhaka_weather_model', registry=registry)
+
 @task
 def detect_drift(current_preds, last_month_preds, threshold=0.3):
     curr_mean = np.mean(current_preds)
