@@ -118,7 +118,7 @@ def compare_metrics(current, logged, thresholds={"mae": 0.2, "mse": 0.2, "r2": 0
 
 # === Flow ===
 
-@flow(name="drift-monitoring-flow")
+@flow
 def drift_monitoring_flow():
     df = fetch_weather_2_days_ago()
     X, y_true = engineer_features(df)
