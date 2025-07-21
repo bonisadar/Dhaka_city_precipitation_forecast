@@ -40,7 +40,7 @@ deployments:
   tags: ["monitoring"]
   schedule: {}
   flow_name: drift-monitoring-flow
-  entrypoint: monitor_drift.py:drift_monitoring_flow
+  entrypoint: monitor_drift.py:drift-monitoring-flow
   work_pool:
     name: first_worker
     work_queue_name: default
