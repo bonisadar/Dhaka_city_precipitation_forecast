@@ -33,3 +33,15 @@ deployments:
     name: first_worker
     work_queue_name: default
     job_variables: {}
+
+
+- name: drift-monitoring-deployment
+  version: v1
+  tags: ["monitoring"]
+  schedule: {}
+  flow_name: drift-monitoring-flow
+  entrypoint: monitor_drift.py:drift_monitoring_flow
+  work_pool:
+    name: first_worker
+    work_queue_name: default
+    job_variables: {}

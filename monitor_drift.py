@@ -1,3 +1,4 @@
+# monitor_drift.py
 import os
 import pandas as pd
 import numpy as np
@@ -6,16 +7,15 @@ import mlflow
 from mlflow.tracking import MlflowClient
 from datetime import datetime, timedelta, timezone
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from prefect import flow, task
 
-# 1. MLflow setup
+# === Setup ===
 mlflow.set_tracking_uri("http://34.58.217.248:5000")
 client = MlflowClient()
-model_name = "model"
-model_uri = f"models:/{model_name}@champion"
-model = mlflow.pyfunc.load_model(model_uri)
 
+# === Tasks ===
 
-# 2. Weather fetching
+@task
 def fetch_weather_2_days_ago():
     target_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
     hourly_vars = [
@@ -32,13 +32,13 @@ def fetch_weather_2_days_ago():
         'hourly': ','.join(hourly_vars),
         'timezone': 'Asia/Dhaka'
     }
-    print(f"Fetching weather data for {target_date}...")
+    print(f"📡 Fetching weather data for {target_date}...")
     res = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params)
     res.raise_for_status()
     return pd.DataFrame(res.json()["hourly"])
 
 
-# 3. Feature engineering
+@task
 def engineer_features(df):
     df['time'] = pd.to_datetime(df['time'])
     df['hour'] = df['time'].dt.hour
@@ -69,17 +69,25 @@ def engineer_features(df):
     return X, y
 
 
-# 4. Get logged metrics from MLflow
-def get_logged_metrics_from_champion(model_name="model", stage="champion"):
+@task
+def load_model(model_name="model", stage="champion"):
+    model_uri = f"models:/{model_name}@{stage}"
+    model = mlflow.pyfunc.load_model(model_uri)
+    print(f"✅ Loaded model from {model_uri}")
+    return model
+
+
+@task
+def get_logged_metrics(model_name="model", stage="champion"):
     latest_ver = client.get_latest_versions(model_name, stages=[stage])[0]
     run_id = latest_ver.run_id
     run = client.get_run(run_id)
     metrics = run.data.metrics
-    print(f"Fetched metrics from run {run_id}: {metrics}")
+    print(f"📦 Logged metrics from run {run_id}: {metrics}")
     return metrics
 
 
-# 5. Current metrics
+@task
 def calculate_metrics(y_true, y_pred):
     return {
         "mae": mean_absolute_error(y_true, y_pred),
@@ -88,45 +96,48 @@ def calculate_metrics(y_true, y_pred):
     }
 
 
-# 6. Compare metrics
+@task
 def compare_metrics(current, logged, thresholds={"mae": 0.2, "mse": 0.2, "r2": 0.05}):
-    print("🔍 Checking for drift in metrics:")
+    print("🔍 Comparing metrics...")
     drift_detected = False
     for metric, threshold in thresholds.items():
         if metric not in current or metric not in logged:
-            print(f"⚠️ Metric '{metric}' missing.")
+            print(f"⚠️ {metric} not found in current or logged metrics.")
             continue
         curr_val = current[metric]
         logged_val = logged[metric]
-        diff = abs(curr_val - logged_val) / (abs(logged_val) + 1e-6)
-        print(f"{metric.upper()}: Current={curr_val:.4f}, Logged={logged_val:.4f}, Drift={diff:.4f}")
-        if diff > threshold:
+        drift = abs(curr_val - logged_val) / (abs(logged_val) + 1e-6)
+        print(f"{metric.upper()} - Current: {curr_val:.4f}, Logged: {logged_val:.4f}, Drift: {drift:.4f}")
+        if drift > threshold:
             print(f"🚨 Drift detected in {metric.upper()}!")
             drift_detected = True
         else:
-            print(f"✅ {metric.upper()} OK.")
+            print(f"✅ {metric.upper()} within threshold.")
     return drift_detected
 
 
-# 7. Run monitoring
-def run_monitoring():
+# === Flow ===
+
+@flow(name="drift-monitoring-flow")
+def drift_monitoring_flow():
     df = fetch_weather_2_days_ago()
     X, y_true = engineer_features(df)
+    model = load_model()
     y_pred = model.predict(X)
 
     if y_true is None:
-        print("⚠️ Cannot calculate metrics – no ground truth available.")
+        print("⚠️ No ground truth available. Cannot calculate drift.")
         return
 
     current_metrics = calculate_metrics(y_true, y_pred)
-    logged_metrics = get_logged_metrics_from_champion(model_name)
+    logged_metrics = get_logged_metrics()
     drift = compare_metrics(current_metrics, logged_metrics)
 
     if drift:
-        print("🎯 ACTION: Consider triggering retraining.")
+        print("🎯 ACTION: Retraining should be triggered.")
     else:
-        print("🟢 No drift. Model performance stable.")
+        print("🟢 No drift detected. Chill for now 😎")
 
 
 if __name__ == "__main__":
-    run_monitoring()
+    drift_monitoring_flow()
