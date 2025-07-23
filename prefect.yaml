@@ -15,7 +15,7 @@ push: null
 # pull section allows you to provide instructions for cloning this project in remote locations
 pull:
 - prefect.deployments.steps.git_clone:
-    repository: git@github.com:bonisadar/Dhaka_city_precipitation_forecast.git
+    repository: https://github.com/bonisadar/Dhaka_city_precipitation_forecast.git
     branch: master
     access_token: null
 
