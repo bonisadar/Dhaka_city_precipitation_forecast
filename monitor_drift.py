@@ -88,6 +88,7 @@ def load_champion_model(model_name="dhaka_city_precipitation_xgb"):
 
 @task
 def get_champion_metrics(model_name="dhaka_city_precipitation_xgb"):
+    logger = get_run_logger()
     latest_ver = sorted(client.get_latest_versions(model_name, stages=[]), key=lambda mv: int(mv.version))[-1]
     run_id = latest_ver.run_id
     run = client.get_run(run_id)
