@@ -18,25 +18,28 @@ client = MlflowClient()
 
 @task
 def fetch_weather_2_days_ago():
+    logger = get_run_logger()
+
     target_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
     hourly_vars = [
-        'temperature_2m', 'relative_humidity_2m', 'dewpoint_2m', 'apparent_temperature',
-        'cloudcover', 'cloudcover_low', 'windspeed_10m', 'winddirection_10m',
-        'surface_pressure', 'vapour_pressure_deficit', 'weathercode',
-        'wet_bulb_temperature_2m', 'precipitation', 'is_day'
+        'temperature_2m', 'relative_humidity_2m', 'dew_point_2m',
+        'apparent_temperature', 'precipitation', 'rain', 'showers',
+        'cloud_cover', 'wind_speed_10m'
     ]
-    params = {
-        'latitude': 23.8103,
-        'longitude': 90.4125,
-        'start_date': target_date,
-        'end_date': target_date,
-        'hourly': ','.join(hourly_vars),
-        'timezone': 'Asia/Dhaka'
-    }
+
+    url = f"https://archive-api.open-meteo.com/v1/archive?latitude=23.8103&longitude=90.4125&start_date={target_date}&end_date={target_date}&hourly={','.join(hourly_vars)}&timezone=Asia/Dhaka"
+
     logger.info(f"📡 Fetching weather data for {target_date}...")
-    res = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params)
-    res.raise_for_status()
-    return pd.DataFrame(res.json()["hourly"])
+    response = requests.get(url)
+
+    if response.status_code != 200:
+        logger.error(f"Failed to fetch weather data: {response.status_code}")
+        raise ValueError(f"API request failed with status {response.status_code}")
+
+    df = pd.DataFrame(response.json()["hourly"])
+    df["time"] = pd.to_datetime(df["time"])
+    logger.info(f"✅ Fetched {len(df)} rows of weather data")
+    return df
 
 
 @task
