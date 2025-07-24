@@ -18,7 +18,7 @@ client = MlflowClient()
 
 @task
 def fetch_weather_2_days_ago():
-    logger = get_run_logger
+    logger = get_run_logger()
     target_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
     hourly_vars = [
         'temperature_2m', 'relative_humidity_2m', 'dewpoint_2m', 'apparent_temperature',
