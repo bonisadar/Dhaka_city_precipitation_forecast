@@ -10,7 +10,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from prefect import flow, task
 
 # === Setup ===
-mlflow.set_tracking_uri("http://34.58.217.248:5000")
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
 client = MlflowClient()
 
 # === Tasks ===
@@ -68,22 +68,21 @@ def engineer_features(df):
 
     return X, y
 
-
 @task
-def load_model(model_name="model", stage="champion"):
-    model_uri = f"models:/{model_name}@{stage}"
+def load_champion_model(model_name="dhaka_city_precipitation_xgb"):
+    model_uri = f"models:/{model_name}@champion"
     model = mlflow.pyfunc.load_model(model_uri)
-    print(f"✅ Loaded model from {model_uri}")
+    print(f"Loaded champion model from {model_uri}")
     return model
 
 
 @task
-def get_logged_metrics(model_name="model", stage="champion"):
-    latest_ver = client.get_latest_versions(model_name, stages=[stage])[0]
+def get_champion_metrics(model_name="dhaka_city_precipitation_xgb"):
+    latest_ver = client.get_latest_versions(model_name, stages=[])[-1]
     run_id = latest_ver.run_id
     run = client.get_run(run_id)
     metrics = run.data.metrics
-    print(f"📦 Logged metrics from run {run_id}: {metrics}")
+    print(f"Champion model metrics from run {run_id}: {metrics}")
     return metrics
 
 
@@ -102,41 +101,34 @@ def compare_metrics(current, logged, thresholds={"mae": 0.2, "mse": 0.2, "r2": 0
     drift_detected = False
     for metric, threshold in thresholds.items():
         if metric not in current or metric not in logged:
-            print(f"⚠️ {metric} not found in current or logged metrics.")
+            print(f"{metric} not found in current or logged metrics.")
             continue
         curr_val = current[metric]
         logged_val = logged[metric]
         drift = abs(curr_val - logged_val) / (abs(logged_val) + 1e-6)
         print(f"{metric.upper()} - Current: {curr_val:.4f}, Logged: {logged_val:.4f}, Drift: {drift:.4f}")
         if drift > threshold:
-            print(f"🚨 Drift detected in {metric.upper()}!")
+            print(f"⚠️ Drift detected in {metric.upper()}!")
             drift_detected = True
         else:
-            print(f"✅ {metric.upper()} within threshold.")
+            print(f"{metric.upper()} within threshold.")
     return drift_detected
 
 
 # === Flow ===
 
-@flow
+@flow(name="drift_monitoring_flow")
 def drift_monitoring_flow():
     df = fetch_weather_2_days_ago()
-    X, y_true = engineer_features(df)
-    model = load_model()
+    X, y = engineer_features(df)
+    model = load_champion_model()
     y_pred = model.predict(X)
 
-    if y_true is None:
-        print("⚠️ No ground truth available. Cannot calculate drift.")
-        return
+    current_metrics = calculate_metrics(y, y_pred)
+    champion_metrics = get_champion_metrics()
 
-    current_metrics = calculate_metrics(y_true, y_pred)
-    logged_metrics = get_logged_metrics()
-    drift = compare_metrics(current_metrics, logged_metrics)
-
-    if drift:
-        print("🎯 ACTION: Retraining should be triggered.")
-    else:
-        print("🟢 No drift detected. Chill for now 😎")
+    drift_detected = compare_metrics(current_metrics, champion_metrics)
+    print(f"Drift detected: {drift_detected}")
 
 
 if __name__ == "__main__":
