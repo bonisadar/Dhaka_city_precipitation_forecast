@@ -7,7 +7,8 @@ import mlflow
 from mlflow.tracking import MlflowClient
 from datetime import datetime, timedelta, timezone
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from prefect import flow, task
+from prefect import flow, task, get_run_logger
+
 
 # === Setup ===
 mlflow.set_tracking_uri("http://127.0.0.1:5000")
@@ -32,7 +33,7 @@ def fetch_weather_2_days_ago():
         'hourly': ','.join(hourly_vars),
         'timezone': 'Asia/Dhaka'
     }
-    print(f"📡 Fetching weather data for {target_date}...")
+    logger.info(f"📡 Fetching weather data for {target_date}...")
     res = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params)
     res.raise_for_status()
     return pd.DataFrame(res.json()["hourly"])
@@ -69,19 +70,20 @@ def engineer_features(df):
     return X, y
 
 
-
 @task
 def load_champion_model(model_name="dhaka_city_precipitation_xgb"):
+    logger = get_run_logger()
     client = MlflowClient()
-    latest_versions = client.get_latest_versions(model_name, stages=[])  # all stages
+    latest_versions = client.get_latest_versions(model_name, stages=[])
     if not latest_versions:
         raise ValueError(f"No versions found for model '{model_name}'")
     
     latest = sorted(latest_versions, key=lambda mv: int(mv.version))[-1]
-    model_uri = f"models:/{model_name}/{latest.version}"  # Not using alias here
+    model_uri = f"models:/{model_name}/{latest.version}"
     model = mlflow.pyfunc.load_model(model_uri)
-    print(f"Loaded model version {latest.version} from {model_uri}")
+    logger.info(f"✅ Loaded model version {latest.version} from {model_uri}")
     return model
+
 
 @task
 def get_champion_metrics(model_name="dhaka_city_precipitation_xgb"):
@@ -89,7 +91,7 @@ def get_champion_metrics(model_name="dhaka_city_precipitation_xgb"):
     run_id = latest_ver.run_id
     run = client.get_run(run_id)
     metrics = run.data.metrics
-    print(f"Champion (latest) model metrics from run {run_id}: {metrics}")
+    logger.info(f"Champion (latest) model metrics from run {run_id}: {metrics}")
     return metrics
 
 @task
@@ -103,28 +105,29 @@ def calculate_metrics(y_true, y_pred):
 
 @task
 def compare_metrics(current, logged, thresholds={"mae": 0.2, "mse": 0.2, "r2": 0.05}):
-    print("🔍 Comparing metrics...")
+    logger = get_run_logger()
+    logger.info("🔍 Comparing metrics...")
     drift_detected = False
     for metric, threshold in thresholds.items():
         if metric not in current or metric not in logged:
-            print(f"{metric} not found in current or logged metrics.")
+            logger.warning(f"{metric} not found in current or logged metrics.")
             continue
         curr_val = current[metric]
         logged_val = logged[metric]
         drift = abs(curr_val - logged_val) / (abs(logged_val) + 1e-6)
-        print(f"{metric.upper()} - Current: {curr_val:.4f}, Logged: {logged_val:.4f}, Drift: {drift:.4f}")
+        logger.info(f"{metric.upper()} - Current: {curr_val:.4f}, Logged: {logged_val:.4f}, Drift: {drift:.4f}")
         if drift > threshold:
-            print(f"⚠️ Drift detected in {metric.upper()}!")
+            logger.warning(f"⚠️ Drift detected in {metric.upper()}!")
             drift_detected = True
         else:
-            print(f"{metric.upper()} within threshold.")
+            logger.info(f"{metric.upper()} within threshold.")
     return drift_detected
-
 
 # === Flow ===
 
 @flow(name="drift_monitoring_flow")
 def drift_monitoring_flow():
+    logger = get_run_logger()
     df = fetch_weather_2_days_ago()
     X, y = engineer_features(df)
     model = load_champion_model()
@@ -134,7 +137,7 @@ def drift_monitoring_flow():
     champion_metrics = get_champion_metrics()
 
     drift_detected = compare_metrics(current_metrics, champion_metrics)
-    print(f"Drift detected: {drift_detected}")
+    logger.info(f"🧪 Drift detected: {drift_detected}")
 
 
 if __name__ == "__main__":
