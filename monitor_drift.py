@@ -68,23 +68,29 @@ def engineer_features(df):
 
     return X, y
 
+
+
 @task
 def load_champion_model(model_name="dhaka_city_precipitation_xgb"):
-    model_uri = f"models:/{model_name}@champion"
+    client = MlflowClient()
+    latest_versions = client.get_latest_versions(model_name, stages=[])  # all stages
+    if not latest_versions:
+        raise ValueError(f"No versions found for model '{model_name}'")
+    
+    latest = sorted(latest_versions, key=lambda mv: int(mv.version))[-1]
+    model_uri = f"models:/{model_name}/{latest.version}"  # Not using alias here
     model = mlflow.pyfunc.load_model(model_uri)
-    print(f"Loaded champion model from {model_uri}")
+    print(f"Loaded model version {latest.version} from {model_uri}")
     return model
-
 
 @task
 def get_champion_metrics(model_name="dhaka_city_precipitation_xgb"):
-    latest_ver = client.get_latest_versions(model_name, stages=[])[-1]
+    latest_ver = sorted(client.get_latest_versions(model_name, stages=[]), key=lambda mv: int(mv.version))[-1]
     run_id = latest_ver.run_id
     run = client.get_run(run_id)
     metrics = run.data.metrics
-    print(f"Champion model metrics from run {run_id}: {metrics}")
+    print(f"Champion (latest) model metrics from run {run_id}: {metrics}")
     return metrics
-
 
 @task
 def calculate_metrics(y_true, y_pred):
