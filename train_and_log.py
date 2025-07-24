@@ -102,7 +102,7 @@ def train_and_log_model(X, y):
     # Tracking URI - use environment variable for flexibility
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment("dhaka_city_precipitation_forecast_v7")
+    mlflow.set_experiment("dhaka_city_precipitation_forecast_v8")
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -151,20 +151,31 @@ def train_and_log_model(X, y):
         # Then later you can fetch it via
         # blob.download_to_filename("y_pred_last_month.txt")
 
-        mlflow.xgboost.log_model(best_model, name="model",
-                                 input_example=X_test.iloc[:5],
-                                 signature=signature)
+        
+        
+        # **Register the model here**
+        mlflow.xgboost.log_model(
+            xgb_model=best_model,
+            artifact_path="model",
+            input_example=X_test.iloc[:5],
+            signature=signature,
+            registered_model_name="dhaka_city_precipitation_xgb"
+        )
 
     print(f"Model trained and logged: MAE={mae:.4f}, R²={r2:.4f}")
     return {"mae": mae, "mse": mse, "r2": r2}
 
 
 @task
-def assign_champion_alias(model_name: str):
+def assign_champion_alias(model_name: str = "dhaka_city_precipitation_xgb"):
     client = MlflowClient()
     latest = client.get_latest_versions(model_name, stages=[])
+    if not latest:
+        raise ValueError(f"No versions found for model '{model_name}'")
     version = sorted(latest, key=lambda mv: int(mv.version))[-1]
     client.set_registered_model_alias(model_name, "champion", version.version)
+    print(f"Champion alias set to version {version.version} of '{model_name}'")
+
 
 
 @task
@@ -216,3 +227,6 @@ def train_and_log_flow():
 
 if __name__ == "__main__":
     train_and_log_flow()
+
+    # Assign champion alias
+    assign_champion_alias("dhaka_city_precipitation_xgb")
