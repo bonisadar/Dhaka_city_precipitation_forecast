@@ -9,7 +9,7 @@ os.environ["PREFECT_API_URL"] = os.getenv("PREFECT_API_URL", "http://127.0.0.1:4
 
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from datetime import datetime
-from prefect import flow, task
+from prefect import flow, task, get_run_logger
 from google.cloud import storage
 import pandas as pd
 import numpy as np
@@ -24,33 +24,36 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 # STEP 1: Download data from GCS
 @task
 def download_from_gcs(blob_name, local_path):
+    logger = get_run_logger()
     bucket_name = "mlops-zoomcamp-bucke-2"
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     blob.download_to_filename(local_path)
-    print(f"Downloaded gs://{bucket_name}/{blob_name} to {local_path}")
+    logger.info(f"Downloaded gs://{bucket_name}/{blob_name} to {local_path}")
     return local_path
 
 # (Optional) Store y_pred.txt outside MLflow too (in GCS)
 # If want to avoid pulling from MLflow (e.g., for faster access or visualization), just upload to GCS directly.
 @task
 def upload_y_pred_to_gcs(local_file, destination_blob_name):
+    logger = get_run_logger()
     bucket_name = "mlops-zoomcamp-bucke-2"
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(local_file)
-    print(f"Uploaded {local_file} to gs://{bucket_name}/{destination_blob_name}")
+    logger.info(f"Uploaded {local_file} to gs://{bucket_name}/{destination_blob_name}")
 
 @task
 def fetch_last_month_y_pred(experiment_name="dhaka_city_precipitation_forecast_v7"):
+    logger = get_run_logger()
     client = MlflowClient()
     
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:
-        print("No experiment found.")
+        logger.info("No experiment found.")
         return None
     
     # Get runs sorted by start time descending
@@ -59,7 +62,7 @@ def fetch_last_month_y_pred(experiment_name="dhaka_city_precipitation_forecast_v
                               max_results=2)
 
     if len(runs) < 2:
-        print("Not enough historical runs for drift detection.")
+        logger.info("Not enough historical runs for drift detection.")
         return None
     
     # Take the *previous* run (second latest)
@@ -99,6 +102,7 @@ def engineer_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
 # STEP 3: Train and log with MLflow
 @task
 def train_and_log_model(X, y):
+    logger = get_run_logger()
     # Tracking URI - use environment variable for flexibility
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     mlflow.set_tracking_uri(tracking_uri)
@@ -141,17 +145,8 @@ def train_and_log_model(X, y):
         np.savetxt("y_pred.txt", y_pred)
         mlflow.log_artifact("y_pred.txt")
         
-        # avoid pulling from MLflow (e.g., for faster access or visualization), just upload to  GCS directly.
-        
         month_str = datetime.now().strftime("%B%Y")
         upload_y_pred_to_gcs("y_pred.txt", f"predictions/y_pred_{month_str}.txt")
-
-        # upload_y_pred_to_gcs("y_pred.txt", "predictions/y_pred_July2025.txt") 
-
-        # Then later you can fetch it via
-        # blob.download_to_filename("y_pred_last_month.txt")
-
-        
         
         # **Register the model here**
         mlflow.xgboost.log_model(
@@ -162,44 +157,54 @@ def train_and_log_model(X, y):
             registered_model_name="dhaka_city_precipitation_xgb"
         )
 
-    print(f"Model trained and logged: MAE={mae:.4f}, R²={r2:.4f}")
+    logger.info(f"Model trained and logged: MAE={mae:.4f}, R²={r2:.4f}")
+    push_metrics_to_prometheus({"mae": mae, "mse": mse, "r2": r2})
     return {"mae": mae, "mse": mse, "r2": r2}
 
 
 @task
 def assign_champion_alias(model_name: str = "dhaka_city_precipitation_xgb"):
+    logger = get_run_logger()
     client = MlflowClient()
     latest = client.get_latest_versions(model_name, stages=[])
     if not latest:
         raise ValueError(f"No versions found for model '{model_name}'")
     version = sorted(latest, key=lambda mv: int(mv.version))[-1]
     client.set_registered_model_alias(model_name, "champion", version.version)
-    print(f"Champion alias set to version {version.version} of '{model_name}'")
+    logger.info(f"Champion alias set to version {version.version} of '{model_name}'")
 
 
 
 @task
 def push_metrics_to_prometheus(metrics):
+    logger = get_run_logger()
     registry = CollectorRegistry()
+
     g_mae = Gauge('model_mae', 'Model MAE', registry=registry)
     g_r2 = Gauge('model_r2', 'Model R²', registry=registry)
+    g_mse = Gauge('model_mse', 'Model MSE', registry=registry)
 
     g_mae.set(metrics['mae'])
     g_r2.set(metrics['r2'])
+    g_mse.set(metrics['mse'])
 
     push_to_gateway('http://127.0.0.1:9091', job='dhaka_weather_model', registry=registry)
+    logger.info("✅ Metrics pushed to Prometheus via Pushgateway.")
+    
+
 
 @task
 def detect_drift(current_preds, last_month_preds, threshold=0.3):
+    logger = get_run_logger()
     curr_mean = np.mean(current_preds)
     last_mean = np.mean(last_month_preds)
     drift = abs(curr_mean - last_mean) / (abs(last_mean) + 1e-6)
     
     if drift > threshold:
-        print(f"Drift detected! Current mean: {curr_mean:.2f}, Last: {last_mean:.2f}")
+        logger.info(f"Drift detected! Current mean: {curr_mean:.2f}, Last: {last_mean:.2f}")
         return True
     else:
-        print("No significant drift.")
+        logger.info("No significant drift.")
         return False
 
 @flow(name="train_and_log_flow")
