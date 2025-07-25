@@ -188,7 +188,8 @@ def push_metrics_to_prometheus(metrics):
     g_r2.set(metrics['r2'])
     g_mse.set(metrics['mse'])
 
-    push_to_gateway('http://127.0.0.1:9091', job='dhaka_weather_model', registry=registry)
+    push_to_gateway('http://pushgateway:9091', job='dhaka_weather_model', registry=registry)
+
     logger.info("✅ Metrics pushed to Prometheus via Pushgateway.")
     
 
