@@ -106,24 +106,37 @@ def calculate_metrics(y_true, y_pred):
 
 
 @task
-def compare_metrics(current, logged, thresholds={"mae": 0.2, "mse": 0.2, "r2": 0.05}):
+def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2": 0.05}):
     logger = get_run_logger()
     logger.info("🔍 Comparing metrics...")
     drift_detected = False
+
     for metric, threshold in thresholds.items():
         if metric not in current or metric not in logged:
             logger.warning(f"{metric} not found in current or logged metrics.")
             continue
+
         curr_val = current[metric]
         logged_val = logged[metric]
-        drift = abs(curr_val - logged_val) / (abs(logged_val) + 1e-6)
-        logger.info(f"{metric.upper()} - Current: {curr_val:.4f}, Logged: {logged_val:.4f}, Drift: {drift:.4f}")
-        if drift > threshold:
-            logger.warning(f"⚠️ Drift detected in {metric.upper()}!")
-            drift_detected = True
-        else:
-            logger.info(f"{metric.upper()} within threshold.")
+
+        if metric in ["mae", "mse"]:
+            drift = curr_val - logged_val  # positive = worse
+            if drift > threshold:
+                logger.warning(f"⚠️ Drift detected in {metric.upper()}! Increased by {drift:.4f}")
+                drift_detected = True
+            else:
+                logger.info(f"{metric.upper()} is within threshold or improved (Δ={drift:.4f})")
+
+        elif metric == "r2":
+            drift = logged_val - curr_val  # positive = worse
+            if drift > threshold:
+                logger.warning(f"⚠️ Drift detected in R²! Dropped by {drift:.4f}")
+                drift_detected = True
+            else:
+                logger.info(f"R² is within threshold or improved (Δ={drift:.4f})")
+
     return drift_detected
+
 
 # === Flow ===
 
