@@ -119,10 +119,12 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
         curr_val = current[metric]
         logged_val = logged[metric]
 
+        logger.info(f"📊 {metric.upper()} - Logged: {logged_val:.4f}, Current: {curr_val:.4f}")
+
         if metric in ["mae", "mse"]:
             drift = curr_val - logged_val  # positive = worse
             if drift > threshold:
-                logger.warning(f"⚠️ Drift detected in {metric.upper()}! Increased by {drift:.4f}")
+                logger.warning(f"🚨 Drift detected in {metric.upper()}! Increased by {drift:.4f}")
                 drift_detected = True
             else:
                 logger.info(f"{metric.upper()} is within threshold or improved (Δ={drift:.4f})")
@@ -130,7 +132,7 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
         elif metric == "r2":
             drift = logged_val - curr_val  # positive = worse
             if drift > threshold:
-                logger.warning(f"⚠️ Drift detected in R²! Dropped by {drift:.4f}")
+                logger.warning(f"🚨 Drift detected in R²! Dropped by {drift:.4f}")
                 drift_detected = True
             else:
                 logger.info(f"R² is within threshold or improved (Δ={drift:.4f})")
