@@ -1,4 +1,9 @@
 # monitor_drift.py
+# Update Prometheus metric reporting to use labels so can query stuff like:
+# model_mae{model_version="v42", city="Dhaka"} 0.1234
+# Or alert on drift like:
+# model_mae{city="Dhaka"} > 0.25
+
 import os
 import pandas as pd
 import numpy as np
@@ -8,6 +13,7 @@ from mlflow.tracking import MlflowClient
 from datetime import datetime, timedelta, timezone
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from prefect import flow, task, get_run_logger
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 
 # === Setup ===
@@ -70,7 +76,6 @@ def engineer_features(df):
 
     return X, y
 
-
 @task
 def load_champion_model(model_name="dhaka_city_precipitation_xgb"):
     logger = get_run_logger()
@@ -82,8 +87,8 @@ def load_champion_model(model_name="dhaka_city_precipitation_xgb"):
     latest = sorted(latest_versions, key=lambda mv: int(mv.version))[-1]
     model_uri = f"models:/{model_name}/{latest.version}"
     model = mlflow.pyfunc.load_model(model_uri)
-    logger.info(f"✅ Loaded model version {latest.version} from {model_uri}")
-    return model
+    logger.info(f"Loaded model version {latest.version} from {model_uri}")
+    return model, latest.version  # returning model version also
 
 
 @task
@@ -97,18 +102,31 @@ def get_champion_metrics(model_name="dhaka_city_precipitation_xgb"):
     return metrics
 
 @task
-def calculate_metrics(y_true, y_pred):
-    return {
-        "mae": mean_absolute_error(y_true, y_pred),
-        "mse": mean_squared_error(y_true, y_pred),
-        "r2": r2_score(y_true, y_pred)
-    }
+def calculate_metrics(y_true, y_pred, model_version, city="Dhaka"):
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
 
+    registry = CollectorRegistry()
+
+    g_mae = Gauge('model_mae', 'Mean Absolute Error of the model', ['model_version', 'city'], registry=registry)
+    g_mse = Gauge('model_mse', 'Mean Squared Error of the model', ['model_version', 'city'], registry=registry)
+    g_r2  = Gauge('model_r2', 'R2 Score of the model', ['model_version', 'city'], registry=registry)
+
+    # Set with labels
+    g_mae.labels(model_version=str(model_version), city=city).set(mae)
+    g_mse.labels(model_version=str(model_version), city=city).set(mse)
+    g_r2.labels(model_version=str(model_version), city=city).set(r2)
+
+    # Push to gateway
+    push_to_gateway('127.0.0.1:9091', job='model_monitoring', registry=registry)
+
+    return {"mae": mae, "mse": mse, "r2": r2}
 
 @task
 def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2": 0.05}):
     logger = get_run_logger()
-    logger.info("🔍 Comparing metrics...")
+    logger.info("Comparing metrics...")
     drift_detected = False
 
     for metric, threshold in thresholds.items():
@@ -119,12 +137,12 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
         curr_val = current[metric]
         logged_val = logged[metric]
 
-        logger.info(f"📊 {metric.upper()} - Logged: {logged_val:.4f}, Current: {curr_val:.4f}")
+        logger.info(f"{metric.upper()} - Logged: {logged_val:.4f}, Current: {curr_val:.4f}")
 
         if metric in ["mae", "mse"]:
             drift = curr_val - logged_val  # positive = worse
             if drift > threshold:
-                logger.warning(f"🚨 Drift detected in {metric.upper()}! Increased by {drift:.4f}")
+                logger.warning(f"Drift detected in {metric.upper()}! Increased by {drift:.4f}")
                 drift_detected = True
             else:
                 logger.info(f"{metric.upper()} is within threshold or improved (Δ={drift:.4f})")
@@ -132,7 +150,7 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
         elif metric == "r2":
             drift = logged_val - curr_val  # positive = worse
             if drift > threshold:
-                logger.warning(f"🚨 Drift detected in R²! Dropped by {drift:.4f}")
+                logger.warning(f"Drift detected in R²! Dropped by {drift:.4f}")
                 drift_detected = True
             else:
                 logger.info(f"R² is within threshold or improved (Δ={drift:.4f})")
@@ -147,15 +165,14 @@ def drift_monitoring_flow():
     logger = get_run_logger()
     df = fetch_weather_2_days_ago()
     X, y = engineer_features(df)
-    model = load_champion_model()
+    model, model_version = load_champion_model()
     y_pred = model.predict(X)
 
-    current_metrics = calculate_metrics(y, y_pred)
+    current_metrics = calculate_metrics(y, y_pred, model_version=model_version, city="Dhaka")
     champion_metrics = get_champion_metrics()
 
     drift_detected = compare_metrics(current_metrics, champion_metrics)
-    logger.info(f"🧪 Drift detected: {drift_detected}")
-
+    logger.info(f"Drift detected: {drift_detected}")
 
 if __name__ == "__main__":
     drift_monitoring_flow()
