@@ -1,8 +1,4 @@
 # monitor_drift.py
-# Update Prometheus metric reporting to use labels so can query stuff like:
-# model_mae{model_version="v42", city="Dhaka"} 0.1234
-# Or alert on drift like:
-# model_mae{city="Dhaka"} > 0.25
 
 import os
 import pandas as pd
@@ -14,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from prefect import flow, task, get_run_logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+from prefect.blocks.notifications import SendgridEmail
 
 
 # === Setup ===
@@ -21,7 +18,6 @@ mlflow.set_tracking_uri("http://127.0.0.1:5000")
 client = MlflowClient()
 
 # === Tasks ===
-
 @task
 def fetch_weather_3_days_ago():
     logger = get_run_logger()
@@ -180,10 +176,10 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
 
 
 # === Flow ===
-
 @flow(name="drift_monitoring_flow")
 def drift_monitoring_flow():
     logger = get_run_logger()
+    
     df = fetch_weather_3_days_ago()
     inspect_data_for_nans(df)
     X, y = engineer_features(df)
@@ -195,6 +191,25 @@ def drift_monitoring_flow():
 
     drift_detected = compare_metrics(current_metrics, champion_metrics)
     logger.info(f"Drift detected: {drift_detected}")
+
+    # SendGrid alert
+    sendgrid_block = SendgridEmail.load("sendgrid-dhaka-city-precipitation-forecast")
+
+    if drift_detected:
+        message = (
+            f"Drift Detected!\n\n"
+            f"Model version: {model_version}\n"
+            f"Metrics now: {current_metrics}\n"
+            f"Metrics then: {champion_metrics}"
+        )
+    else:
+        message = (
+            f"No drift detected for {model_version} at {datetime.now()}.\n"
+            f"Everything's working fine 🚀"
+        )
+    
+    sendgrid_block.notify(message)
+
 
 if __name__ == "__main__":
     drift_monitoring_flow()
