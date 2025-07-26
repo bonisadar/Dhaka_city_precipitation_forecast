@@ -23,9 +23,9 @@ client = MlflowClient()
 # === Tasks ===
 
 @task
-def fetch_weather_2_days_ago():
+def fetch_weather_3_days_ago():
     logger = get_run_logger()
-    target_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
+    target_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime('%Y-%m-%d')
     hourly_vars = [
         'temperature_2m', 'relative_humidity_2m', 'dewpoint_2m', 'apparent_temperature',
         'cloudcover', 'cloudcover_low', 'windspeed_10m', 'winddirection_10m',
@@ -40,7 +40,7 @@ def fetch_weather_2_days_ago():
         'hourly': ','.join(hourly_vars),
         'timezone': 'Asia/Dhaka'
     }
-    logger.info(f"📡 Fetching weather data for {target_date}...")
+    logger.info(f"Fetching weather data for {target_date}...")
     res = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params)
     res.raise_for_status()
     return pd.DataFrame(res.json()["hourly"])
