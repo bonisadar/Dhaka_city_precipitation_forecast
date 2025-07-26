@@ -45,6 +45,27 @@ def fetch_weather_2_days_ago():
     res.raise_for_status()
     return pd.DataFrame(res.json()["hourly"])
 
+@task
+def inspect_data_for_nans(df):
+    logger = get_run_logger()
+    logger.info("Inspecting data for missing values...")
+
+    null_counts = df.isnull().sum()
+    total_rows = len(df)
+
+    if null_counts.sum() == 0:
+        logger.info("No missing values detected in the dataset. Data looks clean!")
+    else:
+        logger.warning("Missing values detected!")
+        logger.warning("Column-wise Null Summary:")
+
+        for col, nulls in null_counts.items():
+            if nulls > 0:
+                percent = (nulls / total_rows) * 100
+                logger.warning(f"  - {col}: {nulls} nulls ({percent:.2f}%)")
+
+        logger.info("Consider handling these before prediction (drop, fill, or flag).")
+
 
 @task
 def engineer_features(df):
@@ -164,6 +185,7 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
 def drift_monitoring_flow():
     logger = get_run_logger()
     df = fetch_weather_2_days_ago()
+    inspect_data_for_nans(df)
     X, y = engineer_features(df)
     model, model_version = load_champion_model()
     y_pred = model.predict(X)
