@@ -184,7 +184,7 @@ def compare_metrics(current, logged, thresholds={"mae": 0.01, "mse": 0.01, "r2":
 @flow(name="drift_monitoring_flow")
 def drift_monitoring_flow():
     logger = get_run_logger()
-    df = fetch_weather_2_days_ago()
+    df = fetch_weather_3_days_ago()
     inspect_data_for_nans(df)
     X, y = engineer_features(df)
     model, model_version = load_champion_model()
