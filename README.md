@@ -59,19 +59,19 @@ on linux_amd64
 
 - Link billing
   - gcloud beta billing projects link dhakacity-forecast-0725 \
-      --billing-account=<your-billing-id>
+       --billing-account=<your-billing-id>
 
 - Enable APIs:
   - gcloud services enable compute.googleapis.com \
-      iam.googleapis.com \
-      storage.googleapis.com \
-      cloudresourcemanager.googleapis.com
+       iam.googleapis.com \
+       storage.googleapis.com \
+       cloudresourcemanager.googleapis.com
 
 - Grant Roles to the Service Account
   - $ gcloud config list account
   - $ gcloud projects add-iam-policy-binding dhakacity-forecast-0725 \
-        --member="serviceAccount:<Your-service-account>" \
-        --role="roles/owner"
+         --member="serviceAccount:<Your-service-account>" \
+         --role="roles/owner"
 
 - your donwloaded key file for the service account
   - $ gcloud auth activate-service-account --key-file=.gcp/<Your-key-file.json>
